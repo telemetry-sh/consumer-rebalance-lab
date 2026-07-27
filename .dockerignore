@@ -1,0 +1,5 @@
+.git
+.github
+build
+*.log
+.DS_Store

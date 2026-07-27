@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="An interactive Kotlin/JVM simulator for consumer group rebalance pauses, assignment churn, static membership, cooperative assignment, and warm handoff."
+    >
+    <title>Consumer Rebalance Lab · telemetry.sh</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="https://telemetry.sh">
+        <span class="brand-mark">t/</span><span>telemetry.sh</span>
+      </a>
+      <span class="header-title">Consumer rebalance lab</span>
+      <a
+        class="source-link"
+        href="https://github.com/telemetry-sh/consumer-rebalance-lab"
+      >source ↗</a>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-copy">
+          <div class="eyebrow">
+            <span>Kotlin 2.4 / JVM</span>
+            <span>consumer group coordination</span>
+          </div>
+          <h1>EVERY CONSUMER<br>WAS HEALTHY.<br><em>NOTHING WAS CONSUMING.</em></h1>
+          <p>
+            A routine rolling restart changes group membership. Under eager
+            revocation, every partition stops—even the ones whose owner never
+            changed. Lag is the shadow cast by the coordination protocol.
+          </p>
+          <a href="#experiment" class="run-action">Deploy generation 42 <span>→</span></a>
+        </div>
+
+        <div class="assignment-console">
+          <div class="console-head">
+            <span>orders-v3 / group.checkout</span>
+            <span id="console-status">rebalance</span>
+          </div>
+          <div class="console-metric">
+            <span>peak group lag</span>
+            <strong id="hero-lag">—</strong>
+            <small>messages</small>
+          </div>
+          <div id="partition-grid" class="partition-grid" aria-label="Partition assignment state"></div>
+          <div class="console-stats">
+            <div><span>partitions revoked</span><strong id="hero-revoked">—</strong></div>
+            <div><span>stop-the-world</span><strong id="hero-stop">—</strong></div>
+            <div><span>recovery</span><strong id="hero-recovery">—</strong></div>
+          </div>
+          <div class="console-log">
+            <span>generation</span><code id="console-log">41 → 42 · assignment pending</code>
+          </div>
+        </div>
+      </section>
+
+      <section id="experiment" class="experiment">
+        <aside class="controls">
+          <div class="section-label">01 / deployment</div>
+          <h2>Restart the group</h2>
+          <p>Replay the same member replacement through all four coordination policies.</p>
+          <form id="controls">
+            <label>
+              <span>Partitions <output data-for="partitions"></output></span>
+              <input name="partitions" type="range" min="4" max="256" step="4" value="48">
+            </label>
+            <label>
+              <span>Consumers <output data-for="consumers"></output></span>
+              <input name="consumers" type="range" min="2" max="32" step="1" value="8">
+            </label>
+            <label>
+              <span>Restarting <output data-for="restarting_consumers"></output></span>
+              <input name="restarting_consumers" type="range" min="1" max="16" step="1" value="2">
+            </label>
+            <label>
+              <span>Incoming records <output data-for="messages_per_second"></output></span>
+              <input name="messages_per_second" type="range" min="100" max="100000" step="100" value="12000">
+            </label>
+            <label>
+              <span>Capacity / consumer <output data-for="processing_per_consumer"></output></span>
+              <input name="processing_per_consumer" type="range" min="100" max="10000" step="100" value="1800">
+            </label>
+            <label>
+              <span>Restart duration <output data-for="restart_seconds"></output></span>
+              <input name="restart_seconds" type="range" min="1" max="60" step="1" value="4">
+            </label>
+            <label>
+              <span>Session timeout <output data-for="session_timeout_seconds"></output></span>
+              <input name="session_timeout_seconds" type="range" min="2" max="120" step="1" value="10">
+            </label>
+            <label>
+              <span>State / partition <output data-for="state_per_partition_mib"></output></span>
+              <input name="state_per_partition_mib" type="range" min="1" max="64" step="1" value="4">
+            </label>
+            <label>
+              <span>Handoff bandwidth <output data-for="handoff_bandwidth_mbps"></output></span>
+              <input name="handoff_bandwidth_mbps" type="range" min="10" max="2000" step="10" value="400">
+            </label>
+            <label>
+              <span>Deploy at <output data-for="deploy_second"></output></span>
+              <input name="deploy_second" type="range" min="2" max="60" step="1" value="15">
+            </label>
+            <label>
+              <span>Run time <output data-for="run_seconds"></output></span>
+              <input name="run_seconds" type="range" min="30" max="180" step="5" value="75">
+            </label>
+            <label>
+              <span>Seed <output data-for="seed"></output></span>
+              <input name="seed" type="range" min="1" max="99999" step="1" value="31173">
+            </label>
+            <button type="reset">Reset deployment</button>
+          </form>
+        </aside>
+
+        <div class="results">
+          <div class="results-heading">
+            <div>
+              <div class="section-label">02 / protocols</div>
+              <h2>Who has to stop when membership changes?</h2>
+            </div>
+            <span id="request-state">running model…</span>
+          </div>
+          <div id="summary-strip" class="summary-strip" aria-live="polite"></div>
+          <div id="strategy-cards" class="strategy-cards"></div>
+
+          <section class="chart-panel">
+            <div class="chart-heading">
+              <div>
+                <div class="section-label">03 / lag wave</div>
+                <h3>Group lag around generation 42</h3>
+              </div>
+              <div id="chart-legend" class="chart-legend"></div>
+            </div>
+            <div class="chart-wrap">
+              <canvas id="lag-chart"></canvas>
+            </div>
+            <p>
+              The dashed line marks deployment. Lag drains only when aggregate
+              processing capacity again exceeds incoming records.
+            </p>
+          </section>
+        </div>
+      </section>
+
+      <section class="comparison">
+        <div class="comparison-copy">
+          <div class="section-label">04 / blast radius</div>
+          <h2>Membership changed.<br>Ownership did not have to.</h2>
+          <p>
+            Rebalance count alone misses the cost. Pair it with the partitions
+            revoked, time without an owner, restored state, commit gaps, and the
+            lag that remains after coordination finishes.
+          </p>
+        </div>
+        <div id="comparison-bars" class="comparison-bars"></div>
+      </section>
+
+      <section class="trace">
+        <div class="trace-heading">
+          <div>
+            <div class="section-label">05 / assignment trace</div>
+            <h2>Generation-aware evidence</h2>
+          </div>
+          <span>selected: <strong id="trace-policy">—</strong></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>time</th>
+                <th>member</th>
+                <th>generation</th>
+                <th>partition</th>
+                <th>action</th>
+                <th>assignment</th>
+                <th>lag</th>
+                <th>p99</th>
+                <th>duplicate risk</th>
+              </tr>
+            </thead>
+            <tbody id="trace-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="telemetry">
+        <div class="telemetry-copy">
+          <div class="section-label">06 / telemetry recipe</div>
+          <h2>Join coordination<br>to consequence.</h2>
+          <p>
+            A rebalance span becomes useful when it carries group generation,
+            protocol, member identity, revoked and assigned partitions, lag, state
+            movement, commits, and processing recovery.
+          </p>
+          <a href="https://telemetry.sh">Explore telemetry.sh ↗</a>
+        </div>
+        <div class="signal-grid">
+          <article><code>consumer.group.generation</code><p>Connects polls and commits to the assignment that authorized them.</p></article>
+          <article><code>consumer.rebalance.protocol</code><p>Classic eager, cooperative, static, or incremental behavior.</p></article>
+          <article><code>consumer.partitions.revoked</code><p>The ownership blast radius, not merely the event count.</p></article>
+          <article><code>consumer.assignment.churn</code><p>The share of partitions whose owner actually changed.</p></article>
+          <article><code>consumer.rebalance.latency_ms</code><p>Coordination time separated from lag recovery time.</p></article>
+          <article><code>consumer.records_lag</code><p>The durable workload consequence of unavailable capacity.</p></article>
+          <article><code>consumer.state_transfer_bytes</code><p>Restore or prewarm work competing with record processing.</p></article>
+          <article><code>consumer.commit.p99_ms</code><p>Commit fencing and duplicate-risk pressure at ownership boundaries.</p></article>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span>Consumer rebalance lab</span>
+      <span>Kotlin / JVM · analytical simulator</span>
+      <a href="https://telemetry.sh">telemetry.sh ↗</a>
+    </footer>
+    <script src="/app.js"></script>
+  </body>
+</html>
